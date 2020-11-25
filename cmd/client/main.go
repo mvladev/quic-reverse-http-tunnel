@@ -150,10 +150,12 @@ func (c *connectServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func clientMain() error {
-	var ca, server string
+	var ca, cert, key, server string
 
 	flag.StringVar(&ca, "ca-file", "", "ca file")
 	flag.StringVar(&server, "server", "127.0.0.1:9999", "host:port of the quic server")
+	flag.StringVar(&cert, "cert-file", "", "client cert file")
+	flag.StringVar(&key, "cert-key", "", "client key file")
 
 	flag.Parse()
 
@@ -167,10 +169,16 @@ func clientMain() error {
 		return fmt.Errorf("could not append certificate data")
 	}
 
+	tlsCert, err := tls.LoadX509KeyPair(cert, key)
+	if err != nil {
+		return fmt.Errorf("could not read client certificates: %s", err)
+	}
+
 	tlsConf := &tls.Config{
-		ServerName: "localhost",
-		RootCAs:    certPool,
-		NextProtos: []string{"quic-echo-example"},
+		ServerName:   "quic-tunnel-server",
+		Certificates: []tls.Certificate{tlsCert},
+		RootCAs:      certPool,
+		NextProtos:   []string{"quic-echo-example"},
 	}
 
 	conf := &quic.Config{
@@ -191,7 +199,7 @@ func clientMain() error {
 		session, err := quic.DialAddrContext(ctx, server, tlsConf, conf)
 		if err != nil {
 			// TODO this needs backoff
-			log.Printf("could not dial server %+v", err)
+			log.Printf("could not dial server %+v\n", err)
 
 			continue
 		}

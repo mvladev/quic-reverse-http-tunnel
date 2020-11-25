@@ -3,16 +3,18 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"math/rand"
 	"net"
 	"sync"
 	"time"
 
-	"github.com/fen4o/quic/internal/pipe"
 	quic "github.com/lucas-clemente/quic-go"
+	"github.com/mvladev/quic-reverse-http-tunnel/internal/pipe"
 )
 
 func main() {
@@ -43,10 +45,11 @@ func (c *clients) nextSession() (quic.Session, error) {
 
 // Start a server that echos all data on the first stream opened by the client
 func startServeer() error {
-	var cert, key, quickListener, tcpListener string
+	var cert, key, clientCACert, quickListener, tcpListener string
 
 	flag.StringVar(&cert, "cert-file", "", "cert file")
 	flag.StringVar(&key, "cert-key", "", "key file")
+	flag.StringVar(&clientCACert, "client-ca-file", "", "client ca cert file")
 	flag.StringVar(&quickListener, "listen-quic", "0.0.0.0:8888", "listen for quic")
 	flag.StringVar(&tcpListener, "listen-tcp", "0.0.0.0:8443", "listen for tcp")
 
@@ -73,8 +76,21 @@ func startServeer() error {
 		panic(err)
 	}
 
+	caPool := x509.NewCertPool()
+
+	certBytes, err := ioutil.ReadFile(clientCACert)
+	if err != nil {
+		log.Fatalf("failed to read client CA cert file %s, got %v", clientCACert, err)
+	}
+	ok := caPool.AppendCertsFromPEM(certBytes)
+	if !ok {
+		log.Fatalf("failed to append client CA cert to the cert pool")
+	}
+
 	tlsc := &tls.Config{
 		Certificates: []tls.Certificate{tlsCert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    caPool,
 		NextProtos:   []string{"quic-echo-example"},
 	}
 

@@ -27,3 +27,14 @@ COPY --from=builder /go/bin/client /client
 WORKDIR /
 
 ENTRYPOINT ["/client"]
+
+############# client-tcp #############
+FROM alpine:3.12.1 AS client-tcp
+
+RUN apk add --update tzdata
+
+COPY --from=builder /go/bin/client-tcp /client-tcp
+
+WORKDIR /
+
+ENTRYPOINT ["/client-tcp"]

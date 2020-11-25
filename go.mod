@@ -1,4 +1,4 @@
-module github.com/fen4o/quic
+module github.com/mvladev/quic-reverse-http-tunnel
 
 go 1.13
 
