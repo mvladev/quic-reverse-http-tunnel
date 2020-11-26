@@ -47,10 +47,12 @@ $ go run cmd/client-tcp/main.go --server=localhost:8888 --ca-file certs/ca.crt -
 2020/11/25 12:07:07 connected to quic server
 ```
 
-Docker file:
+## Docker images
 
-```console
-docker build --target=server -t my-tag/quic-server .
-docker build --target=client -t my-tag/quic-client .
-docker build --target=client-tcp -t my-tag/quic-client-tcp .
-```
+Docker images are available at:
+
+- `ghcr.io/mvladev/quic-reverse-http-tunnel/quic-server:v0.1.2`
+- `ghcr.io/mvladev/quic-reverse-http-tunnel/quic-client:v0.1.2`
+- `ghcr.io/mvladev/quic-reverse-http-tunnel/quic-client-tcp:v0.1.2`
+
+or or at the `latest` tag.
