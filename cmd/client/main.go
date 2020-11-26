@@ -8,13 +8,13 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"net"
 	"net/http"
 	"sync"
 	"time"
 
 	quic "github.com/lucas-clemente/quic-go"
+	"k8s.io/klog/v2"
 )
 
 // We start a server echoing data on the first stream the client opens,
@@ -81,7 +81,7 @@ type connectServer struct {
 }
 
 func (c *connectServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	log.Printf("Received request for host %s, method %s,  useragent %s\n", r.Host, r.Method, r.UserAgent())
+	klog.V(2).InfoS("Received", "host", r.Host, "method", r.Method, "user-agent", r.UserAgent())
 
 	if r.Method != http.MethodConnect {
 		http.Error(w, "this proxy only supports CONNECT passthrough", http.StatusMethodNotAllowed)
@@ -92,6 +92,8 @@ func (c *connectServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Connect to Remote.
 	dst, err := net.Dial("tcp", r.RequestURI)
 	if err != nil {
+		klog.ErrorS(err, "could not dial requested host", "host", r.RequestURI)
+
 		http.Error(w, err.Error(), http.StatusBadRequest)
 
 		return
@@ -100,7 +102,7 @@ func (c *connectServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Upon success, we respond a 200 status code to client.
 	if _, err := w.Write(c.connectResponse); err != nil {
-		log.Printf("could not write 200 response %+v", err)
+		klog.ErrorS(err, "could not write 200 response")
 
 		return
 	}
@@ -109,6 +111,8 @@ func (c *connectServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Which can be either *tcp.Conn, for HTTP, or *tls.Conn, for HTTPS.
 	src, bio, err := w.(http.Hijacker).Hijack()
 	if err != nil {
+		klog.ErrorS(err, "could not hijack connection", "host", r.RequestURI)
+
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 
 		return
@@ -125,7 +129,7 @@ func (c *connectServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if n := bio.Reader.Buffered(); n > 0 {
 			n64, err := io.CopyN(dst, bio, int64(n))
 			if n64 != int64(n) || err != nil {
-				log.Println("io.CopyN:", n64, err)
+				klog.ErrorS(err, "io.Copy failure", "n64", n64, "host", r.RequestURI)
 
 				return
 			}
@@ -133,7 +137,7 @@ func (c *connectServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// src -> dst
 		if _, err := io.Copy(dst, src); err != nil {
-			log.Printf("cant copy from source to destination %+v", err)
+			klog.ErrorS(err, "cant copy from source to destination", "host", r.RequestURI)
 		}
 	}()
 
@@ -142,7 +146,7 @@ func (c *connectServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// dst -> src
 		if _, err := io.Copy(src, dst); err != nil {
-			log.Printf("cant copy from destination to source %+v", err)
+			klog.ErrorS(err, "cant copy from destination to source", "host", r.RequestURI)
 		}
 	}()
 
@@ -156,6 +160,8 @@ func clientMain() error {
 	flag.StringVar(&server, "server", "127.0.0.1:9999", "host:port of the quic server")
 	flag.StringVar(&cert, "cert-file", "", "client cert file")
 	flag.StringVar(&key, "cert-key", "", "client key file")
+
+	klog.InitFlags(nil)
 
 	flag.Parse()
 
@@ -194,28 +200,28 @@ func clientMain() error {
 	ctx := context.Background()
 
 	for {
-		log.Println("dialing quic server...")
+		klog.V(2).InfoS("dialing quic server", "remote", server)
 
 		session, err := quic.DialAddrContext(ctx, server, tlsConf, conf)
 		if err != nil {
 			// TODO this needs backoff
-			log.Printf("could not dial server %+v\n", err)
+			klog.ErrorS(err, "could not dial quic server")
 
 			continue
 		}
 
 		go func() {
 			<-session.Context().Done()
-			log.Println("session closed. Opsie.")
+			klog.V(2).Infoln("session closed.")
 		}()
 
-		log.Println("starting http server")
+		klog.V(2).Infoln("starting http server")
 
 		err = http.Serve(&listener{session: session, ctx: ctx}, &connectServer{
 			connectResponse: []byte("HTTP/1.1 200 OK\r\n\r\n"),
 		})
 		if err != nil {
-			log.Printf("could not close listen on http server %+v", err)
+			klog.ErrorS(err, "failure on http serving")
 		}
 	}
 }

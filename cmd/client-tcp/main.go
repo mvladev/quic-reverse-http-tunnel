@@ -7,12 +7,12 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net"
 	"time"
 
 	quic "github.com/lucas-clemente/quic-go"
 	"github.com/mvladev/quic-reverse-http-tunnel/internal/pipe"
+	"k8s.io/klog/v2"
 )
 
 // We start a server echoing data on the first stream the client opens,
@@ -37,6 +37,8 @@ func clientMain() error {
 	flag.StringVar(&server, "server", "127.0.0.1:9999", "host:port of the quic server")
 	flag.StringVar(&upstream, "upstream", "",
 		"host:port of the proxy server which will send traffic to the correct upstream. e.g. www.example.com:443")
+
+	klog.InitFlags(nil)
 
 	flag.Parse()
 
@@ -76,41 +78,45 @@ func clientMain() error {
 		MaxIncomingUniStreams:                 10000,
 	}
 
+	klog.V(0).InfoS("client started")
+
 	ctx := context.Background()
 
 	for {
-		log.Println("dialing quic server...")
+		klog.V(2).InfoS("dialing quic server", "remote", server)
 
 		session, err := quic.DialAddrContext(ctx, server, tlsConf, conf)
 		if err != nil {
 			// TODO this needs backoff
-			log.Printf("could not dial server %+v", err)
+			klog.ErrorS(err, "could not dial quic server")
 
 			continue
 		}
 
-		log.Println("connected to quic server")
+		klog.V(2).InfoS("connected to quic server", "remote", server)
 
 		for {
 			src, err := session.AcceptStream(ctx)
 			if err != nil {
-				log.Printf("Accept error: %s", err)
+				klog.ErrorS(err, "could not accept quic stream")
 				session.CloseWithError(ListenerCloseCode, "die")
 
 				// Hack
 				time.Sleep(time.Second * 5)
 
-				continue
+				break
 			}
 
-			log.Println("got a new stream from the server")
+			klog.V(2).InfoS("got a new stream from the server", "streamID", src.StreamID())
 
 			dst, err := net.Dial("tcp", upstream)
 			if err != nil {
-				log.Printf("can't dial %q %+v", upstream, err)
+				klog.ErrorS(err, "cannot dial host", "streamID", src.StreamID(), "upstream", upstream)
+
 				if src != nil {
 					src.Close()
 				}
+
 				if dst != nil {
 					dst.Close()
 				}

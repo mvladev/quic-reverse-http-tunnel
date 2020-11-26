@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"math/rand"
 	"net"
 	"sync"
@@ -15,10 +14,11 @@ import (
 
 	quic "github.com/lucas-clemente/quic-go"
 	"github.com/mvladev/quic-reverse-http-tunnel/internal/pipe"
+	"k8s.io/klog/v2"
 )
 
 func main() {
-	log.Fatal(startServeer())
+	klog.Fatal(startServeer())
 }
 
 type clients struct {
@@ -45,14 +45,15 @@ func (c *clients) nextSession() (quic.Session, error) {
 
 // Start a server that echos all data on the first stream opened by the client
 func startServeer() error {
-	var cert, key, clientCACert, quickListener, tcpListener string
+	var cert, key, clientCACert, quicListener, tcpListener string
 
 	flag.StringVar(&cert, "cert-file", "", "cert file")
 	flag.StringVar(&key, "cert-key", "", "key file")
 	flag.StringVar(&clientCACert, "client-ca-file", "", "client ca cert file")
-	flag.StringVar(&quickListener, "listen-quic", "0.0.0.0:8888", "listen for quic")
+	flag.StringVar(&quicListener, "listen-quic", "0.0.0.0:8888", "listen for quic")
 	flag.StringVar(&tcpListener, "listen-tcp", "0.0.0.0:8443", "listen for tcp")
 
+	klog.InitFlags(nil)
 	flag.Parse()
 
 	c := clients{
@@ -69,8 +70,6 @@ func startServeer() error {
 		MaxIncomingUniStreams:                 10000,
 	}
 
-	log.Printf("quick listener on %s", quickListener)
-
 	tlsCert, err := tls.LoadX509KeyPair(cert, key)
 	if err != nil {
 		panic(err)
@@ -80,11 +79,12 @@ func startServeer() error {
 
 	certBytes, err := ioutil.ReadFile(clientCACert)
 	if err != nil {
-		log.Fatalf("failed to read client CA cert file %s, got %v", clientCACert, err)
+		klog.Fatalf("failed to read client CA cert file %s, got %v", clientCACert, err)
 	}
+
 	ok := caPool.AppendCertsFromPEM(certBytes)
 	if !ok {
-		log.Fatalf("failed to append client CA cert to the cert pool")
+		klog.Fatalln("failed to append client CA cert to the cert pool")
 	}
 
 	tlsc := &tls.Config{
@@ -94,34 +94,40 @@ func startServeer() error {
 		NextProtos:   []string{"quic-echo-example"},
 	}
 
-	ql, err := quic.ListenAddr(quickListener, tlsc, conf)
+	klog.V(1).InfoS("listening for quic connections", "address", quicListener)
+
+	ql, err := quic.ListenAddr(quicListener, tlsc, conf)
 	if err != nil {
 		return err
 	}
 
-	log.Printf("tcp listener on %s", tcpListener)
+	klog.V(1).InfoS("listening for tcp connections", "address", tcpListener)
 
 	l, err := net.Listen("tcp4", tcpListener)
 	if err != nil {
-		log.Fatalf("can't listen for tcp on %s: %v", tcpListener, err)
+		klog.Fatal("can't listen for tcp on %s: %v", tcpListener, err)
 	}
+
+	klog.V(0).Infoln("server started")
 
 	ctx := context.Background()
 
+	klog.V(2).Infoln("waiting for tcp client connections")
+
 	go func() {
 		for {
-			log.Println("waiting for tcp client connections")
-
 			src, err := l.Accept()
 			if err != nil {
-				log.Fatalf("Accept error: %s", err)
+				klog.ErrorS(err, "accept new tcp connection failure")
+
+				continue
 			}
 
-			fmt.Printf("accepted TCP client connection %s\n", src.RemoteAddr())
+			klog.V(2).InfoS("accepted TCP client connection", "remote", src.RemoteAddr())
 
 			s, err := c.nextSession()
 			if err != nil {
-				log.Printf("could not process tcp connection %+v", err)
+				klog.ErrorS(err, "could not process tcp connection")
 				src.Close()
 
 				continue
@@ -129,28 +135,28 @@ func startServeer() error {
 
 			stream, err := s.OpenStreamSync(ctx)
 			if err != nil {
-				log.Printf("cannot open stream %+v", err)
+				klog.ErrorS(err, "cannot open stream")
 
 				continue
 			}
 
-			fmt.Printf("opened QUICK Stream connection %d\n", stream.StreamID())
+			klog.V(4).InfoS("opened quic stream connection", "streamID", stream.StreamID())
 
 			go pipe.Request(src, stream)
 		}
 	}()
 
 	for {
-		log.Println("waiting for new quic client session")
+		klog.V(3).Infoln("waiting for new quic client session")
 
 		sess, err := ql.Accept(ctx)
 		if err != nil {
-			log.Printf("got error when accepting the connection %+v", err)
+			klog.ErrorS(err, "unable to accept quic connection")
 
 			continue
 		}
 
-		log.Println("got a quic client session")
+		klog.V(2).InfoS("got a quic client session", "remote", sess.RemoteAddr())
 
 		go func(s quic.Session) {
 			c.mu.Lock()
@@ -158,9 +164,10 @@ func startServeer() error {
 			c.mu.Unlock()
 
 			<-sess.Context().Done()
-			fmt.Println("session closed. Opsie.")
 
-			c.mu.RLock()
+			klog.V(1).InfoS("lost a client")
+
+			c.mu.Lock()
 			for i := 0; i < len(c.sessions); i++ {
 				if c.sessions[i] != s {
 					continue
@@ -177,7 +184,7 @@ func startServeer() error {
 
 				break
 			}
-			c.mu.RUnlock()
+			c.mu.Unlock()
 		}(sess)
 	}
 }
