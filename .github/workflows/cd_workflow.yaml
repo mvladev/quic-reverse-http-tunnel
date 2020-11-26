@@ -20,19 +20,19 @@ jobs:
       uses: crazy-max/ghaction-docker-meta@v1
       with:
         images: ghcr.io/mvladev/quic-reverse-http-tunnel/quic-server
-        tag-sha: true
+        tag-sha: false
     - name: Docker meta client
       id: docker_meta_client
       uses: crazy-max/ghaction-docker-meta@v1
       with:
         images: ghcr.io/mvladev/quic-reverse-http-tunnel/quic-client
-        tag-sha: true
+        tag-sha: false
     - name: Docker meta client-tcp
       id: docker_meta_client_tcp
       uses: crazy-max/ghaction-docker-meta@v1
       with:
         images: ghcr.io/mvladev/quic-reverse-http-tunnel/quic-client-tcp
-        tag-sha: true
+        tag-sha: false
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v1
     - name: Set up Docker Buildx
