@@ -1,0 +1,75 @@
+name: Docker CD
+
+on:
+  push:
+    branches:
+    - master
+    tags:
+    - 'v*'
+  pull_request:
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    name: Docker Build, Tag, Push
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+    - name: Docker meta server
+      id: docker_meta_server
+      uses: crazy-max/ghaction-docker-meta@v1
+      with:
+        images: ghcr.io/mvladev/quic-reverse-http-tunnel/quic-server
+        tag-sha: true
+    - name: Docker meta client
+      id: docker_meta_client
+      uses: crazy-max/ghaction-docker-meta@v1
+      with:
+        images: ghcr.io/mvladev/quic-reverse-http-tunnel/quic-client
+        tag-sha: true
+    - name: Docker meta client-tcp
+      id: docker_meta_client_tcp
+      uses: crazy-max/ghaction-docker-meta@v1
+      with:
+        images: ghcr.io/mvladev/quic-reverse-http-tunnel/quic-client-tcp
+        tag-sha: true
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v1
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v1
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v1
+      with:
+        registry: ghcr.io
+        username: ${{ github.repository_owner }}
+        password: ${{ secrets.CR_PAT }}
+    - name: Build and push server
+      uses: docker/build-push-action@v2
+      with:
+        context: .
+        file: ./Dockerfile
+        target: server
+        platforms: linux/amd64
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: ${{ steps.docker_meta_server.outputs.tags }}
+        labels: ${{ steps.docker_meta_server.outputs.labels }}
+    - name: Build and push client
+      uses: docker/build-push-action@v2
+      with:
+        context: .
+        file: ./Dockerfile
+        target: client
+        platforms: linux/amd64
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: ${{ steps.docker_meta_client.outputs.tags }}
+        labels: ${{ steps.docker_meta_client.outputs.labels }}
+    - name: Build and push client-tcp
+      uses: docker/build-push-action@v2
+      with:
+        context: .
+        file: ./Dockerfile
+        target: client-tcp
+        platforms: linux/amd64
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: ${{ steps.docker_meta_client_tcp.outputs.tags }}
+        labels: ${{ steps.docker_meta_client_tcp.outputs.labels }}
